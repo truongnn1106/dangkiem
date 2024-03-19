@@ -44,13 +44,14 @@ def get_gemini_response(input, image, prompt):
 
 
 def input_image_setup(im):
+    
     if im is not None:
 
         pil_im = Image.fromarray(np.uint8(im))
         b = io.BytesIO()
         pil_im.save(b, format="PNG")
         image_value = b.getvalue()
-
+        
         image_parts = [
             {
                 "data": image_value,
@@ -79,6 +80,14 @@ def send_request(url):
         TxtSoTem.send_keys("DB-0365271")
 
         im = load_image(img_url)
+        # Get the captcha image
+        while im is None:
+            refresh = driver.find_element("id", "ImaRefresh")
+            refresh.click()
+            time.sleep(3)
+            im = load_image(img_url)
+
+        
         image = input_image_setup(im)
 
         prompt = 'You are an expert in understanding captcha. You will receive an input image as captcha. You will output is a text in image. Dont explain any more. I need to a text in ""'
@@ -121,7 +130,7 @@ def load_image(inp):
     try:
         if "http" in inp:
             img_url = inp.replace(" ", "%20")
-            req = urlopen(Request(img_url, headers={"User-Agent": "XYZ/3.0"}))
+            req = urlopen(Request(img_url, headers=headers))
             arr = np.asarray(bytearray(req.read()), dtype=np.uint8)
             img = cv2.imdecode(arr, -1)
         else:
