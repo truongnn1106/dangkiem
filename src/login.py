@@ -99,7 +99,7 @@ def send_request(url):
         # Get the page source
         page_source = driver.page_source
 
-        time.sleep(40)
+        time.sleep(2)
         # Close the browser
         driver.quit()
         return page_source
