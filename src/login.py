@@ -2,14 +2,22 @@ from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from bs4 import BeautifulSoup
 import requests
-import urllib.request
 import cv2
 import numpy as np
-import pytesseract
-from pytesseract import Output
 from PIL import Image
+import PIL.Image as ImageV2
+import numpy as np
+from dotenv import load_dotenv
+import os
+import google.generativeai as genai
+import io
 import cv2
+import time
+import base64
+from urllib.request import Request, urlopen
 
+
+load_dotenv()
 
 ORI_URL = "http://app.vr.org.vn/ptpublic/"
 headers = {
@@ -21,13 +29,37 @@ headers = {
 }
 
 
+os.getenv("GOOGLE_API_KEY")
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+
 def cleanup_text(text):
     return "".join([c if ord(c) < 128 else "" for c in text]).strip()
 
 
-def ocr(img):
-    text = pytesseract.image_to_string(img, lang="eng")
-    return text
+def get_gemini_response(input, image, prompt):
+    model = genai.GenerativeModel("gemini-pro-vision")
+    response = model.generate_content([input, image[0], prompt])
+    return response.text
+
+
+def input_image_setup(im):
+    if im is not None:
+
+        pil_im = Image.fromarray(np.uint8(im))
+        b = io.BytesIO()
+        pil_im.save(b, format="PNG")
+        image_value = b.getvalue()
+
+        image_parts = [
+            {
+                "data": image_value,
+                "mime_type": "image/png",
+            }
+        ]
+        return image_parts
+    else:
+        raise ValueError("Image is empty")
 
 
 def send_request(url):
@@ -37,24 +69,28 @@ def send_request(url):
         # Go to the specified URL
         driver.get(url)
 
+        img_url = driver.find_element("id", "captchaImage").get_attribute("src")
+        print(img_url)
+
         txtBienDK = driver.find_element("name", "txtBienDK")
         txtBienDK.send_keys("51A84920T")
 
         TxtSoTem = driver.find_element("name", "TxtSoTem")
         TxtSoTem.send_keys("DB-0365271")
 
-        # Read image from image url
-        img_url = get_image_capcha(url)
-        img = load_image(img_url)
-        # Save the image
-        cv2.imwrite("captcha.png", img)
-        text = ocr(img)
-        # Processing text
-        text = cleanup_text(text)
-        print(text)
+        im = load_image(img_url)
+        image = input_image_setup(im)
+
+        prompt = 'You are an expert in understanding captcha. You will receive an input image as captcha. You will output is a text in image. Dont explain any more. I need to a text in ""'
+        input = "A photo of a captcha"
+        captcha = get_gemini_response(input, image, prompt)
+        captcha = cleanup_text(captcha)
+        captcha = captcha.replace('"', "")
+        print(captcha)
 
         txtCaptcha = driver.find_element("name", "txtCaptcha")
-        txtCaptcha.send_keys(text)
+        txtCaptcha.send_keys(captcha)
+        time.sleep(1)
 
         # Submit the form by clicking the button
         CmdTraCuu = driver.find_element("name", "CmdTraCuu")
@@ -63,33 +99,37 @@ def send_request(url):
         # Get the page source
         page_source = driver.page_source
 
+        time.sleep(40)
         # Close the browser
-        # driver.quit()
+        driver.quit()
         return page_source
     except Exception as e:
         print(e)
         return None
 
 
-def load_image(image_url):
-    # Load the image from the URL
-    image = requests.get(image_url, headers=headers, allow_redirects=True).content
-    # Decode the image
-    nparr = np.frombuffer(image, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    return img
+def decode_base64_image(base64_string):
+    if "," in base64_string:
+        base64_string = base64_string.split(",")[-1]
+    imgdata = base64.b64decode(base64_string)
+    image = np.frombuffer(imgdata, np.uint8)
+    image = cv2.imdecode(image, cv2.IMREAD_COLOR)
+    return image
 
 
-def get_image_capcha(url):
-    response = requests.get(url, headers=headers, allow_redirects=True).content
-    # Parse the HTML using BeautifulSoup
-    soup = BeautifulSoup(response, "html.parser")
-    # Find the CAPTCHA image tag
-    captcha_img_tag = soup.find("img", id="captchaImage")
-    # Extract the 'src' attribute which contains the URL of the CAPTCHA image
-    captcha_img_url = captcha_img_tag["src"]
-    img_url = ORI_URL + captcha_img_url
-    return img_url
+def load_image(inp):
+    try:
+        if "http" in inp:
+            img_url = inp.replace(" ", "%20")
+            req = urlopen(Request(img_url, headers={"User-Agent": "XYZ/3.0"}))
+            arr = np.asarray(bytearray(req.read()), dtype=np.uint8)
+            img = cv2.imdecode(arr, -1)
+        else:
+            img = decode_base64_image(inp)
+        return img
+    except Exception as e:
+        print(e)
+        return None
 
 
 if __name__ == "__main__":
